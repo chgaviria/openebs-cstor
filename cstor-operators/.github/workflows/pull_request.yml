@@ -1,0 +1,247 @@
+# Copyright 2020 The OpenEBS Authors. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: ci
+
+on:
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'deploy/helm/**'
+      - 'changelogs/**'
+      - 'CHANGELOG.md'
+    branches:
+      # on pull requests to develop and release branches
+      - develop
+      - 'v*'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Shellcheck
+        uses: reviewdog/action-shellcheck@v1
+        with:
+          github_token: ${{ secrets.github_token }}
+          reporter: github-pr-review
+          path: '.'
+          pattern: '*.sh'
+  
+  cspc-operator:
+    runs-on: ubuntu-latest
+    needs: ['lint']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+        with:
+          platforms: all
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          version: v0.5.1
+
+      - name: Build
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./build/cspc-operator/cspc-operator.Dockerfile
+          push: false
+          platforms: linux/amd64, linux/arm64
+          tags: |
+            openebs/cspc-operator:ci
+
+  cvc-operator:
+    runs-on: ubuntu-latest
+    needs: ['lint']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+        with:
+          platforms: all
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          version: v0.5.1
+
+      - name: Build
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./build/cvc-operator/cvc-operator.Dockerfile
+          push: false
+          platforms: linux/amd64, linux/arm64
+          tags: |
+            openebs/cvc-operator:ci
+
+  pool-manager:
+    runs-on: ubuntu-latest
+    needs: ['lint']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+        with:
+          platforms: all
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          version: v0.5.1
+
+      - name: Build
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./build/pool-manager/pool-manager.Dockerfile
+          push: false
+          platforms: linux/amd64, linux/arm64
+          tags: |
+            openebs/cstor-pool-manager:ci
+          build-args: |
+            BASE_IMAGE=openebs/cstor-base:ci
+
+  volume-manager:
+    runs-on: ubuntu-latest
+    needs: ['lint']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+        with:
+          platforms: all
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          version: v0.5.1
+
+      - name: Build
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./build/volume-manager/volume-manager.Dockerfile
+          push: false
+          platforms: linux/amd64, linux/arm64
+          tags: |
+            openebs/cstor-volume-manager:ci
+  
+  cstor-webhook:
+    runs-on: ubuntu-latest
+    needs: ['lint']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+        with:
+          platforms: all
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          version: v0.5.1
+
+      - name: Build
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./build/cstor-webhook/cstor-webhook.Dockerfile
+          push: false
+          platforms: linux/amd64, linux/arm64
+          tags: |
+            openebs/cstor-webhook:ci
+
+  unit-tests:
+    name: unit tests 
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Set up Go 1.19
+      uses: actions/setup-go@v3
+      with:
+        go-version: 1.19.1
+      id: go
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+
+    - name: verify license
+      run: make license-check
+
+    - name: verify dependencies
+      run: make deps
+
+    - name: verify tests
+      run: make test
+
+  e2e-tests:
+    needs: ['unit-tests']
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kubernetes: [v1.27.3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Setup Minikube-Kubernetes
+        uses: medyagh/setup-minikube@latest
+        with:
+          cache: false
+          minikube-version: 1.31.1
+          driver: none
+          kubernetes-version: ${{ matrix.kubernetes }}
+          cni: calico
+          start-args: '--install-addons=false'
+
+      - name: Set tag
+        run: |
+          BRANCH="${GITHUB_REF##*/}"
+          CI_TAG="ci"
+          echo "TAG=${CI_TAG}" >> $GITHUB_ENV
+          echo "BRANCH=${BRANCH}" >> $GITHUB_ENV
+
+      - name: Set up Go 1.19
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.19.1
+        id: go
+        
+      - name: Build images locally
+        run: make all || exit 1;
+      
+      - name: Running tests
+        run: ./ci/sanity/install.sh && ./ci/sanity/sanity.sh
